@@ -3,11 +3,11 @@
 WeChat Auto-publish Pipeline — two-stage daily workflow.
 
 Stage 1  (8:00 CST)   python pipeline.py --stage fetch
-  Fetch all sources → score → save Top 5 to Notion candidates DB
-  → send Bark/PushPlus with candidate list + Notion link
+  Fetch all sources → score → save Top 5 to Obsidian candidate files
+  → send Bark/PushPlus with candidate directory
 
 Stage 2  (12:00 CST)  python pipeline.py --stage publish
-  Check Notion for 选中 candidate → translate → upload images → publish
+  Check Obsidian for selected candidate → translate → archive → publish
   If nothing selected, auto-publish the top-scoring candidate
 
 Single-shot / manual:
@@ -26,13 +26,9 @@ MANUAL_URL = os.getenv("MANUAL_URL", "").strip()
 
 from config import (
     WECHAT_APP_ID, WECHAT_APP_SECRET,
-    NOTION_TOKEN, NOTION_DATABASE_ID,
-    NOTION_CANDIDATES_DATABASE_ID,
 )
 
 WECHAT_ENABLED     = bool(WECHAT_APP_ID and WECHAT_APP_SECRET)
-NOTION_ENABLED     = bool(NOTION_TOKEN and NOTION_DATABASE_ID)
-CANDIDATES_ENABLED = bool(NOTION_TOKEN and NOTION_CANDIDATES_DATABASE_ID)
 
 _TWEET_RE = re.compile(r'https?://(www\.)?(twitter|x)\.com/\S+/status/\d+', re.I)
 
@@ -63,7 +59,7 @@ def _resolve_manual_url(raw: str) -> str:
 # ---------------------------------------------------------------------------
 
 def stage_fetch():
-    """Fetch, score, save Top 5 to Notion, notify yorihan."""
+    """Fetch, score, save Top 5 to Obsidian, notify yorihan."""
     print("[pipeline] Stage 1: fetch & shortlist")
     init_db()
 
@@ -91,30 +87,23 @@ def stage_fetch():
         print(f"  {i}. [{a['score']}] {a['title'][:60]} ({a['source']})")
 
     if DRY_RUN:
-        print("[pipeline] DRY RUN — skipping Notion write and notification")
+        print("[pipeline] DRY RUN — skipping Obsidian write and notification")
         return
 
-    if CANDIDATES_ENABLED:
-        from candidate_store import save_candidates, create_source_log
-        # Write daily source log (all articles with links, grouped by source)
-        print("[pipeline] Writing daily source log to Notion...")
-        create_source_log(articles)
-        db_url = save_candidates(top5)
+    from obsidian_store import save_candidates, create_source_log
+    print("[pipeline] Writing daily source log to Obsidian...")
+    create_source_log(articles)
+    candidate_dir = save_candidates(top5)
 
-        lines = ["今日 Top 5 候选文章已存入 Notion，请选一篇（截止中午12点）：", ""]
-        for i, a in enumerate(top5, 1):
-            lines.append(f"{i}. [{a['score']}分] {a['title'][:50]}")
-            lines.append(f"   来源：{a['source']} | {a['url']}")
-            lines.append("")
-        lines.append(f"候选库：{db_url}")
-        lines.append("把想发的那篇 Status 改为「选中」即可，不选则自动发第1名。")
-        send_bark("📰 今日候选文章", "\n".join(lines)) or \
-            send_pushplus("📰 今日候选文章", "\n".join(lines))
-    else:
-        # No candidates DB — just notify with top pick
-        best = top5[0]
-        msg = f"今日最佳（score={best['score']}）：{best['title']}\n来源：{best['source']}\n{best['url']}\n\n提示：设置 NOTION_CANDIDATES_DATABASE_ID 可启用人工选稿功能。"
-        send_bark("📰 今日文章候选", msg) or send_pushplus("📰 今日文章候选", msg)
+    lines = ["今日 Top 5 候选文章已存入 Obsidian，请选一篇（截止中午12点）：", ""]
+    for i, a in enumerate(top5, 1):
+        lines.append(f"{i}. [{a['score']}分] {a['title'][:50]}")
+        lines.append(f"   来源：{a['source']} | {a['url']}")
+        lines.append("")
+    lines.append(f"候选目录：{candidate_dir}")
+    lines.append("把候选 Markdown 的 frontmatter `status: candidate` 改为 `status: selected` 即可，不选则自动发第1名。")
+    send_bark("📰 今日候选文章", "\n".join(lines)) or \
+        send_pushplus("📰 今日候选文章", "\n".join(lines))
 
     print("[pipeline] Stage 1 done.")
 
@@ -134,8 +123,8 @@ def stage_publish():
         article_url = _resolve_manual_url(MANUAL_URL)
         chosen = {"url": article_url, "title": article_url, "source": "Manual", "score": 100}
 
-    elif CANDIDATES_ENABLED:
-        from candidate_store import get_selected_candidate, get_top_candidate_today
+    else:
+        from obsidian_store import get_selected_candidate, get_top_candidate_today
         chosen = get_selected_candidate()
         if chosen:
             print(f"[pipeline] User selected: {chosen['title']}")
@@ -160,7 +149,7 @@ def stage_publish():
 
 
 # ---------------------------------------------------------------------------
-# Shared core: translate + write to Notion / WeChat
+# Shared core: translate + write to Obsidian / WeChat
 # ---------------------------------------------------------------------------
 
 def _translate_and_publish(article: dict):
@@ -182,24 +171,23 @@ def _translate_and_publish(article: dict):
     chinese_title = extract_chinese_title(translated)
     print(f"[pipeline] Chinese title: {chinese_title}")
 
-    notion_url = ""
+    obsidian_path = ""
 
-    # Format all WeChat themes (used for both Notion preview blocks and WeChat draft)
+    # Format all WeChat themes (used for both Obsidian archive and WeChat draft)
     print("[pipeline] Formatting WeChat themes...")
     from formatter import format_all_themes, format_article
     wechat_themes = format_all_themes(translated, chinese_title)
 
-    if NOTION_ENABLED:
-        print("[pipeline] Writing to Notion (uploading images)...")
-        from notion_writer import write_to_notion
-        notion_url = write_to_notion(
-            title=chinese_title,
-            translated_md=translated,
-            source_url=article["url"],
-            cover_url=cover_url,
-            images=images,
-            wechat_themes=wechat_themes,
-        )
+    print("[pipeline] Writing to Obsidian...")
+    from obsidian_store import write_to_obsidian
+    obsidian_path = write_to_obsidian(
+        title=chinese_title,
+        translated_md=translated,
+        source_url=article["url"],
+        cover_url=cover_url,
+        images=images,
+        wechat_themes=wechat_themes,
+    )
 
     if WECHAT_ENABLED:
         from wechat import create_draft
@@ -212,14 +200,14 @@ def _translate_and_publish(article: dict):
         )
         print(f"[pipeline] WeChat draft: {draft_id}")
 
-    if not WECHAT_ENABLED and not NOTION_ENABLED:
-        print("[pipeline] WARNING: Neither WeChat nor Notion configured.")
+    if not WECHAT_ENABLED and not obsidian_path:
+        print("[pipeline] WARNING: Neither WeChat nor Obsidian archive configured.")
         print(f"[pipeline] Translated content:\n{translated[:500]}...")
 
     mark_published(article["url"], chinese_title)
 
-    if notion_url:
-        msg = f"「{chinese_title}」已存入 Notion：{notion_url}"
+    if obsidian_path:
+        msg = f"「{chinese_title}」已存入 Obsidian：{obsidian_path}"
     else:
         msg = f"「{chinese_title}」翻译完成，请查看微信草稿箱。"
     send_bark("✅ 今日文章已发布", msg) or send_pushplus("✅ 今日文章已发布", msg)
@@ -257,7 +245,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="WeChat Auto-publish Pipeline")
     parser.add_argument(
         "--stage", choices=["fetch", "publish"],
-        help="fetch=collect Top5 to Notion (8am); publish=translate & post (12pm)"
+        help="fetch=collect Top5 to Obsidian (8am); publish=translate & post (12pm)"
     )
     args = parser.parse_args()
 

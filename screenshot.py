@@ -1,4 +1,4 @@
-"""Render HTML to screenshot and upload to GitHub for Notion preview."""
+"""Render HTML to screenshot and upload to GitHub for preview."""
 import base64, os, tempfile, httpx
 from datetime import date
 

@@ -1,5 +1,8 @@
 name: Daily WeChat Publish
 
+permissions:
+  contents: write
+
 on:
   # Stage 1 — 08:00 JST (23:00 UTC prev-day): fetch & shortlist Top 5
   # Stage 2 — 12:00 JST (03:00 UTC): translate & publish selected article
@@ -19,15 +22,12 @@ on:
 
 env:
   DEEPSEEK_API_KEY:              ${{ secrets.DEEPSEEK_API_KEY }}
-  NOTION_TOKEN:                  ${{ secrets.NOTION_TOKEN }}
-  NOTION_DATABASE_ID:            ${{ secrets.NOTION_DATABASE_ID }}
-  NOTION_CANDIDATES_DATABASE_ID: ${{ secrets.NOTION_CANDIDATES_DATABASE_ID }}
+  OBSIDIAN_ARCHIVE_DIR:          ${{ secrets.OBSIDIAN_ARCHIVE_DIR }}
   WECHAT_APP_ID:                 ${{ secrets.WECHAT_APP_ID }}
   WECHAT_APP_SECRET:             ${{ secrets.WECHAT_APP_SECRET }}
   WECHAT_COVER_MEDIA_ID:         ${{ secrets.WECHAT_COVER_MEDIA_ID }}
   BARK_KEY:                      ${{ secrets.BARK_KEY }}
   PUSHPLUS_TOKEN:                ${{ secrets.PUSHPLUS_TOKEN }}
-  GH_PAT:                        ${{ secrets.GH_PAT }}
   RSSHUB_BASE_URL:               ${{ secrets.RSSHUB_BASE_URL }}
   MANUAL_URL:                    ${{ github.event.inputs.url }}
 
@@ -82,4 +82,24 @@ jobs:
           else
             echo "Unknown trigger — running single-shot pipeline"
             python pipeline.py
+          fi
+
+      - name: Commit Obsidian archive changes
+        run: |
+          if [ -z "$OBSIDIAN_ARCHIVE_DIR" ] || [ "$OBSIDIAN_ARCHIVE_DIR" = "obsidian" ] || [ "$OBSIDIAN_ARCHIVE_DIR" = "./obsidian" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            if [ ! -e obsidian ]; then
+              echo "No obsidian directory to commit"
+              exit 0
+            fi
+            git add obsidian
+            if git diff --cached --quiet; then
+              echo "No Obsidian archive changes to commit"
+            else
+              git commit -m "chore: update Obsidian archive"
+              git push
+            fi
+          else
+            echo "OBSIDIAN_ARCHIVE_DIR points outside ./obsidian; skipping repo commit"
           fi

@@ -1,6 +1,6 @@
 # wechat-autopublish
 
-每天自动从 53 个 AI/技术信息源抓取优质文章，用 DeepSeek 翻译成中文，写入 Notion 供人工选稿，最终发布到微信公众号草稿箱。
+每天自动从 53 个 AI/技术信息源抓取优质文章，用 DeepSeek 翻译成中文，写入 Obsidian Markdown 供人工选稿，最终发布到微信公众号草稿箱。
 
 ---
 
@@ -10,8 +10,8 @@
 |------|------|
 | 🔍 多源抓取 | 53 个 Twitter/X 账号 + 16 个 RSS 源，每天自动采集 |
 | 🤖 AI 翻译 | DeepSeek API，保留原文结构，自动生成中文标题 |
-| 📋 人工选稿 | 每天 8am 推送 Top 5 候选，在 Notion 里选一篇，12pm 自动发布 |
-| 📖 Notion 存档 | 全文写入 Notion，图片直接上传至 Notion 文件存储 |
+| 📋 人工选稿 | 每天 8am 推送 Top 5 候选，在 Obsidian 候选文件里选一篇，12pm 自动发布 |
+| 📖 Obsidian 存档 | 全文写入 Markdown，微信 HTML 单独保存为本地文件 |
 | 🎨 4 套微信排版 | 绿/蓝/极简/紫，inline CSS，直接复制到公众号编辑器 |
 | 💬 养虾社 CTA | 每篇文章开头结尾自动插入品牌 CTA（橙色 `#FF6600` 加粗） |
 | 📱 消息推送 | Bark（iOS）/ PushPlus 推送选稿通知和发布结果 |
@@ -25,18 +25,18 @@
 08:00 CST — Stage 1: 抓取 & 选稿
   ├─ 抓取所有 RSS + Twitter 信息源
   ├─ 打分排序，取 Top 5 候选
-  ├─ 存入 Notion 候选库（字段自动初始化）
-  └─ Bark/PushPlus 推送候选列表 + Notion 链接
+  ├─ 存入 Obsidian 候选目录
+  └─ Bark/PushPlus 推送候选列表 + 候选目录
 
-        ↕  你在 Notion 候选库把想发的那篇 Status 改为「选中」
+        ↕  你把候选 Markdown 的 status: candidate 改为 status: selected
            （不操作则 12pm 自动发 Top 1）
 
 12:00 CST — Stage 2: 翻译 & 发布
   ├─ 读取「选中」候选（或自动取 Top 1）
   ├─ 抓取文章全文 + 封面图
   ├─ DeepSeek 翻译成中文，提取中文标题
-  ├─ 写入 Notion 存档库（含图片上传）
-  ├─ 生成 4 套微信 HTML → 存入 Notion code block 供复制
+  ├─ 写入 Obsidian 文章存档（远程图片链接保留）
+  ├─ 生成 4 套微信 HTML → 存入文章同目录供复制
   ├─ 推送至微信公众号草稿箱（如已配置）
   └─ 推送发布完成通知
 ```
@@ -98,7 +98,7 @@ fetcher 从推文正文中提取**外链文章 URL**，不直接发推文内容�
 
 ## 微信排版
 
-每篇文章自动生成 4 套主题 HTML，存入 Notion code block，粘贴进微信公众号编辑器直接使用。
+每篇文章自动生成 4 套主题 HTML，存入 Obsidian 文章同目录，粘贴进微信公众号编辑器直接使用。
 
 | 主题 | 主色 | 适合 |
 |------|------|------|
@@ -148,9 +148,7 @@ cp .env.example .env
 | 变量 | 必填 | 说明 |
 |------|------|------|
 | `DEEPSEEK_API_KEY` | ✅ | [DeepSeek 控制台](https://platform.deepseek.com) 获取 |
-| `NOTION_TOKEN` | 推荐 | Notion Integration token（不填则跳过 Notion 写入） |
-| `NOTION_DATABASE_ID` | 推荐 | 文章存档数据库 ID |
-| `NOTION_CANDIDATES_DATABASE_ID` | 推荐 | 每日候选数据库 ID（不填则跳过人工选稿，直接发 Top 1） |
+| `OBSIDIAN_ARCHIVE_DIR` | 可选 | Obsidian 存档根目录；不填则写入仓库内 `obsidian/` |
 | `WECHAT_APP_ID` | 可选 | 微信公众号 AppID |
 | `WECHAT_APP_SECRET` | 可选 | 微信公众号 AppSecret |
 | `WECHAT_COVER_MEDIA_ID` | 可选 | 默认封面图 media_id |
@@ -158,16 +156,26 @@ cp .env.example .env
 | `PUSHPLUS_TOKEN` | 可选 | PushPlus 推送 token |
 | `RSSHUB_BASE_URL` | 可选 | 自托管 RSSHub 地址（不填用公共实例） |
 
-### 3. 创建 Notion 数据库
+### 3. 配置 Obsidian 存档目录
 
-**文章存档库**（`NOTION_DATABASE_ID`）
-- 在 Notion 新建全页数据库
-- 将 Integration 加入该数据库
-- 从 URL 复制 32 位数据库 ID 填入环境变量
+本地运行时建议把 `OBSIDIAN_ARCHIVE_DIR` 指向你的 Vault 子目录：
 
-**每日候选库**（`NOTION_CANDIDATES_DATABASE_ID`）
-- 新建另一个空的全页数据库（字段由 pipeline 自动创建）
-- 每天 8am 自动写入 Top 5，把想发的那篇 `Status` 改为「选中」即可
+```bash
+OBSIDIAN_ARCHIVE_DIR="/Users/hy/Documents/Obsidian Vault/wechat-autopublish"
+```
+
+不设置时默认写入仓库内 `obsidian/`，适合 GitHub Actions。每天 8am 会生成：
+
+```text
+obsidian/
+├── candidates/YYYY-MM-DD/
+│   ├── 01-title.md
+│   ├── 02-title.md
+│   └── source-log.md
+└── articles/YYYY/
+```
+
+把想发的候选文件 frontmatter 从 `status: candidate` 改成 `status: selected` 即可；不改则 12pm 自动发布最高分候选。
 
 ### 4. 配置 GitHub Secrets
 
@@ -176,7 +184,7 @@ cp .env.example .env
 ### 5. 本地验证
 
 ```bash
-# 干跑，不写 Notion 不发微信
+# 干跑，不写 Obsidian 不发微信
 DRY_RUN=true python pipeline.py
 
 # 只跑 Stage 1（抓取 + 选稿推送）
@@ -203,11 +211,13 @@ MANUAL_URL=https://example.com/article python pipeline.py
 - **填入 URL**：对指定链接跑全流程
 - **填入 stage**：单独跑 `fetch` 或 `publish`
 
+Actions 默认把 `obsidian/` 目录提交回仓库，方便上午生成候选、人工修改 `status: selected`、中午继续读取同一批候选。
+
 ---
 
 ## 手动触发（日常使用）
 
-在推特上发现好文章 → 直接把链接发给 **Daruma**（团队 AI） → 她自动调 GitHub Actions API 触发完整流水线 → 结果写入 Notion + 推送通知。
+在推特上发现好文章 → 直接把链接发给 **Daruma**（团队 AI） → 她自动调 GitHub Actions API 触发完整流水线 → 结果写入 Obsidian + 推送通知。
 
 支持：
 - Twitter/X 推文链接（自动提取推文中的外链文章）
@@ -241,8 +251,7 @@ wechat-autopublish/
 ├── scorer.py            # 文章打分（相关性 + 来源权重 + 新鲜度）
 ├── translator.py        # DeepSeek 翻译 + 中文标题提取
 ├── formatter.py         # 4 套微信 HTML 主题 + 养虾社 CTA
-├── notion_writer.py     # Notion 写入（含图片直传）
-├── candidate_store.py   # 候选库读写（自动建列）
+├── obsidian_store.py    # Obsidian 候选文件 + 文章存档
 ├── screenshot.py        # Playwright 截图 + 上传 GitHub
 ├── notifier.py          # Bark / PushPlus 推送
 ├── wechat.py            # 微信公众号草稿箱 API

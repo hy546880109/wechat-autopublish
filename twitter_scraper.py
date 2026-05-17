@@ -2,6 +2,7 @@
 twitter_scraper.py — X.com scraper using a saved Playwright session.
 
 First-time setup (saves session to .twitter_session/):
+  python twitter_scraper.py --manual-login
   python twitter_scraper.py --login
   python twitter_scraper.py --login --username EMAIL --password PASS
 
@@ -13,7 +14,10 @@ Subsequent runs reuse the saved session automatically.
 
 import time, os
 from pathlib import Path
+from dotenv import load_dotenv
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
+
+load_dotenv(Path(__file__).parent / ".env")
 
 SESSION_DIR  = Path(__file__).parent / ".twitter_session"
 SESSION_FILE = SESSION_DIR / "state.json"
@@ -99,6 +103,47 @@ def login_and_save_session(username: str = "", password: str = "") -> bool:
             return False
 
 
+def manual_login_and_save_session(browser_channel: str = "") -> bool:
+    """Open a visible browser so the user can log in to X.com manually."""
+    SESSION_DIR.mkdir(exist_ok=True)
+    print("[twitter] Opening browser. Log in to X.com, then return here and press Enter.")
+
+    with sync_playwright() as p:
+        launch_args = {"headless": False}
+        if browser_channel:
+            launch_args["channel"] = browser_channel
+        browser = p.chromium.launch(**launch_args)
+        ctx = browser.new_context(
+            viewport={"width": 1280, "height": 900},
+            user_agent=(
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0.0.0 Safari/537.36"
+            ),
+        )
+        page = ctx.new_page()
+        page.goto("https://x.com/i/flow/login", wait_until="domcontentloaded", timeout=30000)
+        input("[twitter] Press Enter after X.com is logged in: ")
+
+        logged_in = False
+        try:
+            page.goto("https://x.com/home", wait_until="domcontentloaded", timeout=30000)
+            page.wait_for_selector('[data-testid="SideNav_NewTweet_Button"]', timeout=10000)
+            logged_in = True
+        except Exception:
+            logged_in = "home" in page.url
+
+        if logged_in:
+            ctx.storage_state(path=str(SESSION_FILE))
+            print(f"[twitter] Login successful. Session saved -> {SESSION_FILE}")
+            browser.close()
+            return True
+
+        print(f"[twitter] Login may have failed — URL: {page.url}")
+        browser.close()
+        return False
+
+
 def _session_exists() -> bool:
     return SESSION_FILE.exists() and SESSION_FILE.stat().st_size > 100
 
@@ -112,6 +157,19 @@ _UA = (
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/124.0.0.0 Safari/537.36"
 )
+
+
+def _tweet_id_to_ts(url: str) -> float | None:
+    """Convert an X/Twitter snowflake status ID to a Unix timestamp."""
+    import re
+
+    m = re.search(r"/status/(\d+)", url)
+    if not m:
+        return None
+    tweet_id = int(m.group(1))
+    twitter_epoch_ms = 1288834974657
+    created_ms = (tweet_id >> 22) + twitter_epoch_ms
+    return created_ms / 1000
 
 
 def _scrape_page(page, account: str, limit: int = 5) -> list[dict]:
@@ -137,6 +195,7 @@ def _scrape_page(page, account: str, limit: int = 5) -> list[dict]:
         if not text or len(text) < 30:
             continue
         url = links[i] if i < len(links) else f"https://x.com/{account}"
+        published_ts = _tweet_id_to_ts(url) or time.time() - i * 1800
         results.append({
             "title": text[:100].replace("\n", " "),
             "summary": text,
@@ -144,7 +203,7 @@ def _scrape_page(page, account: str, limit: int = 5) -> list[dict]:
             "source": f"@{account}",
             "author": account,
             "tier": 1,
-            "published_ts": time.time() - i * 1800,
+            "published_ts": published_ts,
         })
     return results
 
@@ -219,11 +278,21 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Twitter/X scraper")
     parser.add_argument("--login",    action="store_true", help="Log in and save session")
+    parser.add_argument("--manual-login", action="store_true", help="Open a browser for manual login")
+    parser.add_argument("--browser", choices=["chromium", "chrome", "msedge"], default="chromium", help="Browser for manual login")
     parser.add_argument("--username", default="", help="X.com username or email")
     parser.add_argument("--password", default="", help="X.com password")
     args = parser.parse_args()
 
-    if args.login:
+    if args.manual_login:
+        channel = "" if args.browser == "chromium" else args.browser
+        ok = manual_login_and_save_session(channel)
+        if ok:
+            print("\n[twitter] Testing session with @AnthropicAI...")
+            items = scrape_account("AnthropicAI", limit=2)
+            for item in items:
+                print(f"  {item['source']}: {item['title'][:70]}")
+    elif args.login:
         ok = login_and_save_session(args.username, args.password)
         if ok:
             print("\n[twitter] Testing session with @AnthropicAI...")

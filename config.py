@@ -16,10 +16,8 @@ WECHAT_APP_ID = os.environ.get("WECHAT_APP_ID", "")
 WECHAT_APP_SECRET = os.environ.get("WECHAT_APP_SECRET", "")
 WECHAT_COVER_MEDIA_ID = os.environ.get("WECHAT_COVER_MEDIA_ID", "")
 
-# Notion — optional; pipeline writes to Notion if token is set
-NOTION_TOKEN = os.environ.get("NOTION_TOKEN", "")
-NOTION_DATABASE_ID = os.environ.get("NOTION_DATABASE_ID", "")
-NOTION_CANDIDATES_DATABASE_ID = os.environ.get("NOTION_CANDIDATES_DATABASE_ID", "")
+# Obsidian — local/CI file archive root
+OBSIDIAN_ARCHIVE_DIR = Path(os.environ.get("OBSIDIAN_ARCHIVE_DIR") or Path(__file__).parent / "obsidian")
 BARK_KEY = os.environ.get("BARK_KEY", "")
 PUSHPLUS_TOKEN = os.environ.get("PUSHPLUS_TOKEN", "")
 USE_MD2WECHAT = os.environ.get("USE_MD2WECHAT", "false").lower() == "true"
@@ -29,9 +27,6 @@ WECHAT_THEME = os.environ.get("WECHAT_THEME", "autumn-warm")
 # Self-host: docker run -d -p 1200:1200 diygod/rsshub
 # Then set: RSSHUB_BASE_URL=http://your-server:1200
 RSSHUB_BASE_URL = os.environ.get("RSSHUB_BASE_URL", "https://rsshub.app").rstrip("/")
-
-# GitHub PAT with gist scope — used to upload WeChat HTML themes as private Gists
-GH_PAT = os.environ.get("GH_PAT", "")
 
 BASE_DIR = Path(__file__).parent
 

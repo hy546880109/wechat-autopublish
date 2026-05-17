@@ -5,6 +5,7 @@ from urllib.parse import urljoin
 from config import SOURCES, TWITTER_ACCOUNTS
 from db import is_duplicate
 from email.utils import parsedate_to_datetime
+from datetime import datetime, timezone
 
 
 # --- helpers ---
@@ -20,6 +21,24 @@ def _parse_published(entry: dict) -> float:
         except Exception:
             pass
     return time.time() - 86400
+
+
+def _parse_inline_date(text: str) -> float | None:
+    """Parse dates embedded in scraped card text, e.g. 'May 8, 2026'."""
+    m = re.search(
+        r"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+"
+        r"(\d{1,2}),\s+(20\d{2})(?!\d)",
+        text,
+        re.I,
+    )
+    if not m:
+        return None
+    month_name, day, year = m.groups()
+    try:
+        dt = datetime.strptime(f"{month_name[:3]} {day} {year}", "%b %d %Y")
+    except ValueError:
+        return None
+    return dt.replace(tzinfo=timezone.utc).timestamp()
 
 
 def _is_valid_img(src: str) -> bool:
@@ -101,9 +120,10 @@ def scrape_anthropic() -> list[dict]:
         title = a.get_text(strip=True)
         if not title or len(title) < 10 or title.lower() in ("news", "research", "company"):
             continue
+        published_ts = _parse_inline_date(title) or time.time() - 86400
         articles.append({
             "title": title, "url": url, "summary": "",
-            "published_ts": time.time() - 86400,
+            "published_ts": published_ts,
             "source": "Anthropic", "tier": 1,
         })
     return articles[:8]
@@ -128,9 +148,10 @@ def scrape_anthropic_research() -> list[dict]:
             title = a.get_text(strip=True)
             if not title or len(title) < 10:
                 continue
+            published_ts = _parse_inline_date(title) or time.time() - 86400
             articles.append({
                 "title": title, "url": url, "summary": "",
-                "published_ts": time.time() - 86400,
+                "published_ts": published_ts,
                 "source": "Anthropic Research", "tier": 1,
             })
         return articles[:6]
@@ -158,9 +179,10 @@ def scrape_claude_blog() -> list[dict]:
             title = a.get_text(strip=True)
             if not title or len(title) < 10:
                 continue
+            published_ts = _parse_inline_date(title) or time.time() - 86400
             articles.append({
                 "title": title, "url": url, "summary": "",
-                "published_ts": time.time() - 86400,
+                "published_ts": published_ts,
                 "source": "Claude Blog", "tier": 1,
             })
         return articles[:6]
